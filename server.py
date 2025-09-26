@@ -67,17 +67,6 @@ async def login_tool(name: str = None, age: int = None) -> Any:
 
         If the user mentions any of these actions but does not provide both name and age, ask them to supply the missing information.
     """
-    if name is None or age is None:
-        missing = []
-        if name is None:
-            missing.append("name")
-        if age is None:
-            missing.append("age")
-        # Return a message that MCP can use to prompt for missing arguments
-        return {
-            "error": "missing_arguments",
-            "message": f"To help you with the login process, please provide your {', '.join(missing)}."
-        }
     payload = {"name": name, "age": age}
     logger.info(f"Calling login API with payload: {payload}")
     response = await call_login_api(payload)
@@ -85,9 +74,9 @@ async def login_tool(name: str = None, age: int = None) -> Any:
     return response
 
 @mcp.tool()
-async def query_tool(query: str, top_k: int = 5, min_score: float = 0.5) -> Any:
+async def query_tool(query: str) -> Any:
     """Use this tool when the user asks questions related to 'lomma', 'lomaa', 'lomaa it', 'lomaa it solutions', or any general information queries. This tool searches the RAG system to provide relevant answers based on the stored knowledge base."""
-    payload = {"query": query, "top_k": top_k, "min_score": min_score}
+    payload = {"query": query}
     return await call_query_api(payload)
 
 if __name__ == "__main__":
