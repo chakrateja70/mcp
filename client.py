@@ -106,13 +106,20 @@ class MCPClient:
             response_text = gemini_reply.text
 
             # Match tools Gemini suggested
+            # Match tools Gemini suggested
             for tool in available_tools:
                 tool_name = tool['name']
                 if tool_name.lower() in response_text.lower():
                     required_props = list(tool['input_schema']['properties'].keys())
                     provided_params = {}
 
-                    # Try to fill parameters from query
+                    if tool_name == "query_tool":
+                        # 🔹 Special case: always map user input as 'query'
+                        provided_params["query"] = query
+                        result = await self.session.call_tool(tool_name, provided_params)
+                        return f"✅ Used tool {tool_name}:\n{result.content[0].text}"
+
+                    # Default behavior for other tools
                     for param in required_props:
                         if param.lower() in query.lower():
                             provided_params[param] = query
@@ -127,11 +134,10 @@ class MCPClient:
                     # If all params found → call tool
                     result = await self.session.call_tool(tool_name, provided_params)
                     return f"✅ Used tool {tool_name}:\n{result.content[0].text}"
-
             return response_text
         except Exception as e:
             return f"Error processing query: {str(e)}"
-
+        
     async def chat_loop(self):
         print("\nMCP Client Started!")
         print("Type your queries or 'quit' to exit.")
