@@ -21,10 +21,13 @@ genai.configure(api_key=GEN_API_KEY)
 
 # Initialize the model
 model = genai.GenerativeModel("gemini-2.5-pro")
+
 class MCPClient:
     def __init__(self):
         self.session: Optional[ClientSession] = None
         self.exit_stack = AsyncExitStack()
+        # 🔹 New: Track pending tool calls waiting for missing params
+        self.pending_tool_call = None  
 
     async def connect_to_server(self, server_script_path: str):
         is_python = server_script_path.endswith('.py')
@@ -48,13 +51,33 @@ class MCPClient:
         tools = response.tools
         print("\nConnected to server with tools:", [tool.name for tool in tools])
 
-    # Initialize model globally (so it's reused)
-    
-
     async def process_query(self, query: str) -> str:
         """Process a query using Gemini and MCP tools"""
+
+        # 🔹 CASE 1: We are waiting for user to provide missing parameters
+        if self.pending_tool_call:
+            tool_name, collected_params, missing_params = self.pending_tool_call
+
+            # For now assume user gives values in order separated by commas
+            user_inputs = [val.strip() for val in query.split(",")]
+            if len(user_inputs) != len(missing_params):
+                return f"Expected {len(missing_params)} values: {', '.join(missing_params)}"
+
+            # Merge into collected_params
+            for key, val in zip(missing_params, user_inputs):
+                collected_params[key] = val
+
+            # Call tool now that we have everything
+            try:
+                result = await self.session.call_tool(tool_name, collected_params)
+                self.pending_tool_call = None  # reset
+                return f"✅ Used tool {tool_name}:\n{result.content[0].text}"
+            except Exception as e:
+                self.pending_tool_call = None
+                return f"❌ Error calling tool {tool_name}: {e}"
+        
+        # 🔹 CASE 2: Normal flow (Gemini decides)
         try:
-            # List tools from MCP
             response = await self.session.list_tools()
             available_tools = [{
                 "name": tool.name,
@@ -62,61 +85,52 @@ class MCPClient:
                 "input_schema": tool.inputSchema
             } for tool in response.tools]
 
-            # Create a context-aware prompt that includes available tools
             tools_context = "\n".join([
                 f"- {tool['name']}: {tool['description']}" 
                 for tool in available_tools
             ])
             
             enhanced_query = f"""
-                You are given the following information:
                 Available MCP Tools:
                 {tools_context}
                 User Query:
                 {query}
                 Instructions:
-                1. First, decide if the user query can be answered directly without using any tool.
-                2. If a tool is required, identify the most suitable tool from the list above.
-                3. Clearly specify:
-                - The tool name
-                - The exact parameters/inputs to use
-                4. If no tool is needed, provide a concise and accurate answer directly.
-                Now determine the best response.
+                - Decide if a tool is needed.
+                - If yes, give tool name and map query to inputs.
+                - If required params are missing, just mention that.
             """
 
-            # Start a chat with the Gemini model
             chat = model.start_chat(history=[])
             gemini_reply = chat.send_message(enhanced_query)
-            
-            # Get the text response
             response_text = gemini_reply.text
-            
+
+            # Match tools Gemini suggested
             for tool in available_tools:
                 tool_name = tool['name']
                 if tool_name.lower() in response_text.lower():
-                    # Try to extract or ask for parameters
-                    print(f"\nGemini suggested using tool: {tool_name}")
-                    # print(f"Tool description: {tool['description']}")
+                    required_props = list(tool['input_schema']['properties'].keys())
+                    provided_params = {}
+
+                    # Try to fill parameters from query
+                    for param in required_props:
+                        if param.lower() in query.lower():
+                            provided_params[param] = query
+
+                    missing_params = [p for p in required_props if p not in provided_params]
+
+                    if missing_params:
+                        # 🔹 Ask user for missing params and store state
+                        self.pending_tool_call = (tool_name, provided_params, missing_params)
+                        return f"To use {tool_name}, please provide information in this specific format: {', '.join(missing_params)}"
                     
-                    try:
-                        if 'search' in tool['input_schema'].get('properties', {}):
-                            # If tool has a 'search' parameter, use the query
-                            result = await self.session.call_tool(tool_name, {"search": query})
-                            return f"Used tool {tool_name}:\n{result.content[0].text}"
-                        else:
-                            # Try with the most common parameter names
-                            common_params = ['query', 'text', 'input', 'prompt']
-                            for param in common_params:
-                                if param in tool['input_schema'].get('properties', {}):
-                                    result = await self.session.call_tool(tool_name, {param: query})
-                                    return f"Used tool {tool_name}:\n{result.content[0].text}"
-                    except Exception as tool_error:
-                        print(f"Error calling tool {tool_name}: {tool_error}")
-                        continue
-            return response_text  
+                    # If all params found → call tool
+                    result = await self.session.call_tool(tool_name, provided_params)
+                    return f"✅ Used tool {tool_name}:\n{result.content[0].text}"
+
+            return response_text
         except Exception as e:
             return f"Error processing query: {str(e)}"
-
 
     async def chat_loop(self):
         print("\nMCP Client Started!")
