@@ -69,33 +69,35 @@ class MCPClient:
             ])
             
             enhanced_query = f"""
-                Available MCP tools:
+                You are given the following information:
+                Available MCP Tools:
                 {tools_context}
+                User Query:
+                {query}
+                Instructions:
+                1. First, decide if the user query can be answered directly without using any tool.
+                2. If a tool is required, identify the most suitable tool from the list above.
+                3. Clearly specify:
+                - The tool name
+                - The exact parameters/inputs to use
+                4. If no tool is needed, provide a concise and accurate answer directly.
+                Now determine the best response.
+            """
 
-                User query: {query}
-
-                If you need to use any of the available tools to answer this query, please let me know which tool and what parameters to use.
-                Otherwise, provide a direct answer.
-                """
-
-            # Simple chat without tools parameter
+            # Start a chat with the Gemini model
             chat = model.start_chat(history=[])
             gemini_reply = chat.send_message(enhanced_query)
             
             # Get the text response
             response_text = gemini_reply.text
             
-            # Check if Gemini suggests using a tool (simple pattern matching)
-            # This is a basic approach - in production, you'd want more sophisticated parsing
             for tool in available_tools:
                 tool_name = tool['name']
                 if tool_name.lower() in response_text.lower():
                     # Try to extract or ask for parameters
                     print(f"\nGemini suggested using tool: {tool_name}")
-                    print(f"Tool description: {tool['description']}")
+                    # print(f"Tool description: {tool['description']}")
                     
-                    # For this example, let's try calling the tool with the original query as parameter
-                    # In a real implementation, you'd parse the suggested parameters
                     try:
                         if 'search' in tool['input_schema'].get('properties', {}):
                             # If tool has a 'search' parameter, use the query
@@ -111,9 +113,7 @@ class MCPClient:
                     except Exception as tool_error:
                         print(f"Error calling tool {tool_name}: {tool_error}")
                         continue
-            
-            return response_text
-            
+            return response_text  
         except Exception as e:
             return f"Error processing query: {str(e)}"
 
