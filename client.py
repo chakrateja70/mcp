@@ -20,7 +20,7 @@ if not GEN_API_KEY:
 genai.configure(api_key=GEN_API_KEY)
 
 # Initialize the model
-model = genai.GenerativeModel("gemini-2.5-pro")
+model = genai.GenerativeModel("gemini-2.5-flash")
 
 class MCPClient:
     def __init__(self):
@@ -153,7 +153,6 @@ class MCPClient:
 
     async def cleanup(self):
         await self.exit_stack.aclose()
-
 
 async def main():
     if len(sys.argv) < 2:
